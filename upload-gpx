@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import subprocess
+import sys
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Upload a GPX track file to a Garmin device via USB. Wrapper for gpsbabel.")
+    parser.add_argument("--track", help="GPX track file", type=str, required=True)
+    parser.add_argument("--downsample", help="Simplify track to less waypoints", type=int, default=100)
+    args = parser.parse_args()
+
+    command = ["gpsbabel",
+               "-s", "-r",
+               "-i", "gpx",
+               "-f", os.path.abspath(args.track),
+               "-x", "transform,rte=trk",
+               "-x", "simplify,count={}".format(args.downsample),
+               "-o", "garmin",
+               "-F", "usb:"]
+
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        sys.exit(1)
+
+    sys.exit(0)
+    
