@@ -112,5 +112,7 @@ if __name__ == "__main__":
     # 6. Install packages
     subprocess.run(["apt-get", "-y", "install"] + args.system_packages, check=True)
 
+    print("Device(s) and system configured successfully. Please re-plug them.")
+
     sys.exit(0)
     
