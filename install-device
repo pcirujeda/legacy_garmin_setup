@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+
+import argparse
+import getpass
+import json
+import os
+import re
+import subprocess
+import sys
+
+
+def question(q): return True if input(q).lower() == "y" else False
+
+def list_usb_devices():
+    """
+    Parses lsusb results
+    """
+    device_re = re.compile("Bus\s+(?P<bus>\d+)\s+Device\s+(?P<device>\d+).+ID\s(?P<id>\w+:\w+)\s(?P<tag>.+)$", re.I)
+
+    lsusb_output = subprocess.check_output("lsusb", encoding="UTF-8")
+
+    devices = []
+    for dev in lsusb_output.split('\n'):
+        dev_data = device_re.match(dev)
+        if dev_data:
+            devices.append(dev_data.groupdict())
+    
+    return devices
+
+def update_file_if_needed(filename, line):
+    if not os.path.exists(filename):
+        with open(filename, 'w'): pass
+
+    with open(filename, "r+") as f:
+        line_found = any(line in l for l in f)
+        if not line_found:
+            f.seek(0, os.SEEK_END)
+            f.write("{}\n".format(line))
+            return True
+
+    return False
+
+def update_tlp_file(add_device_id):
+    dev_blacklist = []
+    with open("/etc/default/tlp", "r") as f:
+        for l in f:
+            if l.startswith("USB_BLACKLIST"):
+                dev_blacklist = l.split("=")[1].replace('"', '').split()
+
+    if add_device_id in dev_blacklist:
+        print("Power management for device id {} already configured".format(add_device_id))
+        return
+    else:
+        with open("/etc/default/tlp", "r") as f:
+            tlp_contents = f.read()
+            tlp_contents_updated = re.sub('^USB_BLACKLIST[ ]*=[ ]*(".*")', \
+                                          'USB_BLACKLIST="{}"'.format(' '.join(dev_blacklist+[add_device_id])), \
+                                          tlp_contents, flags=re.M)
+
+        with open("/etc/default/tlp", "w") as f:
+            f.write(tlp_contents_updated)
+            print("Appended power management rule for device id {}".format(add_device_id))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Legacy Garmin Outdoors GPS setup script")
+    parser.add_argument("--device-pattern", help="Tag pattern to identify the device", type=str, default="garmin")
+    parser.add_argument("--system-packages", help="System packages to install", nargs='*', default=["gpsbabel", "gpsbabel-gui"])
+    args = parser.parse_args()
+
+    if not question("Is your Garmin device connected to the USB port? (y/N): "):
+        sys.exit(1)
+
+    # 1. List USB connected devices
+    devices = list_usb_devices()
+
+    # 2. Look for Garmin device(s)
+    garmin_devices = [dev for dev in devices if re.search(args.device_pattern, dev["tag"], re.IGNORECASE)]
+
+    if len(garmin_devices) == 0:
+        print("Device could not be found")
+        sys.exit(1)
+
+    print("Found {} device(s)".format(len(garmin_devices)))
+    print(json.dumps(garmin_devices, indent=2))
+
+    # 3. Blacklist garmin_gps module if needed
+    if update_file_if_needed("/etc/modprobe.d/blacklist.conf", "blacklist garmin_gps"):
+        print("Blacklisted garmin_gps module")
+    else:
+        print("garmin_gps module already blacklisted")
+
+    # 4. Create udev rules
+    for d in garmin_devices: 
+        vendor_id = d["id"].split(":")[0]
+        product_id = d["id"].split(":")[1]
+        rule = 'SUBSYSTEM=="usb", ATTR{{idVendor}}=="{}", ATTRS{{idProduct}}=="{}" MODE="0666", GROUP="plugdev"'.format(vendor_id, product_id)
+        if update_file_if_needed("/etc/udev/rules.d/51-garmin.rules", rule):
+            print("Appended udev rule for device id {}".format(d["id"]))
+        else:
+            print("Device id {} already configured".format(d["id"]))
+
+    if not question("udev rules are about to be reloaded. Agree? (y/N): "):
+        sys.exit(1)
+
+    subprocess.run("udevadm control --reload-rules", shell=True, check=True)
+
+    # 5. Blacklist device from power settings
+    for d in garmin_devices:
+        update_tlp_file(d["id"])
+
+    # 6. Install packages
+    subprocess.run(["apt-get", "-y", "install"] + args.system_packages, check=True)
+
+    sys.exit(0)
+    
