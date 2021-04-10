@@ -11,3 +11,17 @@ The ```install-device``` script is a simple state machine that will allow you to
 * creating udev rules
 * blacklisting the GPS from power rules
 * installing the necessary system packages
+
+Run it as follows:
+
+```
+sudo install-device
+  [--device-pattern garmin]
+  [--system-packages gpsbabel gpsbabel-gui]
+```
+
+The ```upload-gpx``` script will copy a GPX track file easily to your configured device+system:
+
+```
+upload-gpx --track file.gpx [--downsample 150]
+```
